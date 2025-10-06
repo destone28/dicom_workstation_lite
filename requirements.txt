@@ -1,0 +1,17 @@
+# Backend Dependencies
+fastapi
+uvicorn[standard]
+pydicom
+pillow
+numpy
+python-multipart
+
+# Frontend Dependencies
+PyQt6
+requests
+
+# Testing Dependencies
+pytest
+pytest-cov
+pytest-qt
+httpx

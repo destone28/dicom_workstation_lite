@@ -1,0 +1,1 @@
+# DICOM Workstation Lite - Tests
