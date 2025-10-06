@@ -127,7 +127,7 @@ def get_pixel_array(dicom_dataset: pydicom.Dataset) -> np.ndarray:
         rescale_intercept = getattr(dicom_dataset, 'RescaleIntercept', 0.0)
 
         if rescale_slope != 1.0 or rescale_intercept != 0.0:
-            pixel_array = pixel_array * rescale_slope + rescale_intercept
+            pixel_array = (pixel_array * rescale_slope + rescale_intercept).astype(np.float32)
 
         return pixel_array
 
@@ -239,8 +239,8 @@ def array_to_png_bytes(pixel_array: np.ndarray) -> bytes:
             else:
                 pixel_array = np.zeros_like(pixel_array, dtype=np.uint8)
 
-        # Create PIL Image from array (grayscale mode 'L')
-        image = Image.fromarray(pixel_array, mode='L')
+        # Create PIL Image from array (grayscale)
+        image = Image.fromarray(pixel_array)
 
         # Convert to PNG bytes
         byte_io = io.BytesIO()
@@ -277,7 +277,7 @@ def resize_image_array(pixel_array: np.ndarray, target_size: tuple[int, int]) ->
                           (pixel_max - pixel_min) * 255).astype(np.uint8)
 
         # Use PIL for high-quality resizing
-        image = Image.fromarray(pixel_array, mode='L')
+        image = Image.fromarray(pixel_array)
         resized = image.resize(target_size, Image.Resampling.LANCZOS)
 
         return np.array(resized)
