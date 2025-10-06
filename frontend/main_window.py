@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QFileDialog
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QAction, QPixmap
+from PyQt6.QtGui import QAction, QPixmap, QImage
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -250,16 +250,125 @@ class MainWindow(QMainWindow):
             self.refresh_studies()
 
     # ========================================================================
-    # Placeholder Methods (to be implemented)
+    # File Operations
     # ========================================================================
 
     def upload_files(self):
         """Open file dialog and upload selected DICOM files."""
-        pass
+        try:
+            # Open file dialog for multiple DICOM files
+            file_paths, _ = QFileDialog.getOpenFileNames(
+                self,
+                "Select DICOM Files",
+                "",
+                "DICOM Files (*.dcm);;All Files (*)"
+            )
+
+            if not file_paths:
+                # User cancelled
+                return
+
+            # Show uploading message
+            self.status_bar.showMessage(f"Uploading {len(file_paths)} file(s)...")
+
+            # Convert to Path objects
+            paths = [Path(f) for f in file_paths]
+
+            # Upload files
+            results = self.api_client.upload_files(paths)
+
+            # Show success message
+            if results:
+                result = results[0]  # First study result
+                message = (
+                    f"Successfully uploaded {result['num_files']} file(s)\n\n"
+                    f"Study UID: {result['study_uid']}\n"
+                    f"Patient ID: {result['patient_id']}"
+                )
+                QMessageBox.information(
+                    self,
+                    "Upload Successful",
+                    message
+                )
+
+                # Refresh studies list
+                self.refresh_studies()
+
+                self.status_bar.showMessage(f"✓ Uploaded {result['num_files']} file(s)")
+
+        except ValueError as e:
+            QMessageBox.critical(
+                self,
+                "Upload Error",
+                f"Invalid files:\n{str(e)}"
+            )
+            self.status_bar.showMessage("✗ Upload failed")
+
+        except RuntimeError as e:
+            QMessageBox.critical(
+                self,
+                "Upload Error",
+                f"Upload failed:\n{str(e)}"
+            )
+            self.status_bar.showMessage("✗ Upload failed")
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Unexpected Error",
+                f"An unexpected error occurred:\n{str(e)}"
+            )
+            self.status_bar.showMessage("✗ Upload failed")
 
     def refresh_studies(self):
         """Refresh the studies list from the backend."""
-        pass
+        try:
+            # Get studies from API
+            studies = self.api_client.get_studies()
+
+            # Clear current list
+            self.studies_list.clear()
+
+            # Populate list with studies
+            for study in studies:
+                # Format display text
+                display_text = (
+                    f"Patient: {study['patient_name']} | "
+                    f"Date: {study['study_date']} | "
+                    f"{study['modality']}"
+                )
+
+                # Create list item
+                item = QListWidgetItem(display_text)
+
+                # Store full study dict in item data for later retrieval
+                item.setData(Qt.ItemDataRole.UserRole, study)
+
+                # Add to list
+                self.studies_list.addItem(item)
+
+            # Update status bar
+            self.status_bar.showMessage(f"✓ Loaded {len(studies)} study/studies")
+
+        except RuntimeError as e:
+            QMessageBox.warning(
+                self,
+                "Refresh Error",
+                f"Failed to refresh studies:\n{str(e)}"
+            )
+            self.status_bar.showMessage("✗ Refresh failed")
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Unexpected Error",
+                f"An unexpected error occurred:\n{str(e)}"
+            )
+            self.status_bar.showMessage("✗ Refresh failed")
+
+    # ========================================================================
+    # Study and Image Display
+    # ========================================================================
 
     def on_study_selected(self, item: QListWidgetItem):
         """
@@ -268,15 +377,157 @@ class MainWindow(QMainWindow):
         Args:
             item: Selected list widget item containing study data
         """
-        pass
+        try:
+            # Get study data from item
+            study = item.data(Qt.ItemDataRole.UserRole)
+            if not study:
+                return
+
+            # Store current study
+            self.current_study = study
+
+            # Update study info label
+            study_info = (
+                f"<b>Patient:</b> {study['patient_name']} "
+                f"<b>ID:</b> {study['patient_id']} | "
+                f"<b>Date:</b> {study['study_date']} | "
+                f"<b>Modality:</b> {study['modality']}"
+            )
+            self.study_info_label.setText(study_info)
+
+            # Get detailed study information with images
+            self.status_bar.showMessage("Loading study details...")
+            study_detail = self.api_client.get_study_detail(study['study_uid'])
+
+            # Extract images list
+            self.current_images = study_detail.get('images', [])
+
+            # Reset to first image
+            self.current_index = 0
+
+            # Update metadata display with study info
+            metadata_text = (
+                f"Study Information:\n"
+                f"Patient ID: {study_detail['patient_id']}\n"
+                f"Patient Name: {study_detail['patient_name']}\n"
+                f"Study Date: {study_detail['study_date']}\n"
+                f"Modality: {study_detail['modality']}\n"
+                f"Number of Images: {len(self.current_images)}\n"
+            )
+            self.metadata_text.setPlainText(metadata_text)
+
+            # Show first image
+            if self.current_images:
+                self.show_image()
+            else:
+                self.image_label.setText("No images in study")
+                self.position_label.setText("Image: 0 / 0")
+
+        except RuntimeError as e:
+            QMessageBox.warning(
+                self,
+                "Study Load Error",
+                f"Failed to load study details:\n{str(e)}"
+            )
+            self.status_bar.showMessage("✗ Failed to load study")
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Unexpected Error",
+                f"An unexpected error occurred:\n{str(e)}"
+            )
+            self.status_bar.showMessage("✗ Failed to load study")
+
+    def show_image(self):
+        """Display the current image with the current preset."""
+        try:
+            # Check if we have images
+            if not self.current_images:
+                return
+
+            # Get current image metadata
+            image = self.current_images[self.current_index]
+            sop_uid = image['sop_uid']
+
+            # Update status
+            self.status_bar.showMessage(f"Loading image {self.current_index + 1}...")
+
+            # Get image bytes from API
+            image_bytes = self.api_client.get_image_bytes(sop_uid, self.current_preset)
+
+            # Convert bytes to QImage then QPixmap
+            qimage = QImage.fromData(image_bytes)
+            pixmap = QPixmap.fromImage(qimage)
+
+            # Scale to fit label while maintaining aspect ratio
+            scaled_pixmap = pixmap.scaled(
+                self.image_label.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+
+            # Set pixmap to label
+            self.image_label.setPixmap(scaled_pixmap)
+
+            # Update position label
+            total = len(self.current_images)
+            self.position_label.setText(f"Image: {self.current_index + 1} / {total}")
+
+            # Update metadata display with image info
+            metadata_text = (
+                f"Study Information:\n"
+                f"Patient ID: {self.current_study['patient_id']}\n"
+                f"Patient Name: {self.current_study['patient_name']}\n"
+                f"Study Date: {self.current_study['study_date']}\n"
+                f"Modality: {self.current_study['modality']}\n\n"
+                f"Current Image:\n"
+                f"Instance Number: {image['instance_number']}\n"
+                f"SOP UID: {sop_uid}\n"
+                f"Window Preset: {self.current_preset}\n"
+            )
+            self.metadata_text.setPlainText(metadata_text)
+
+            # Enable/disable navigation buttons based on position
+            self.prev_btn.setEnabled(self.current_index > 0)
+            self.next_btn.setEnabled(self.current_index < len(self.current_images) - 1)
+
+            # Update status
+            self.status_bar.showMessage(
+                f"✓ Showing image {self.current_index + 1} of {total} ({self.current_preset})"
+            )
+
+        except RuntimeError as e:
+            QMessageBox.warning(
+                self,
+                "Image Load Error",
+                f"Failed to load image:\n{str(e)}"
+            )
+            self.status_bar.showMessage("✗ Failed to load image")
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Unexpected Error",
+                f"An unexpected error occurred:\n{str(e)}"
+            )
+            self.status_bar.showMessage("✗ Failed to load image")
+
+    # ========================================================================
+    # Navigation
+    # ========================================================================
 
     def next_image(self):
         """Navigate to the next image in the current series."""
-        pass
+        if self.current_images and self.current_index < len(self.current_images) - 1:
+            self.current_index += 1
+            self.show_image()
 
     def previous_image(self):
         """Navigate to the previous image in the current series."""
-        pass
+        if self.current_images and self.current_index > 0:
+            self.current_index -= 1
+            self.show_image()
 
     def apply_preset(self, preset: str):
         """
@@ -285,7 +536,15 @@ class MainWindow(QMainWindow):
         Args:
             preset: Preset name (default, lung, bone, brain, liver)
         """
-        pass
+        # Update current preset
+        self.current_preset = preset
+
+        # Re-render current image with new preset
+        if self.current_images:
+            self.show_image()
+
+        # Update status bar
+        self.status_bar.showMessage(f"✓ Applied {preset} preset")
 
     def show_about(self):
         """Show about dialog."""
