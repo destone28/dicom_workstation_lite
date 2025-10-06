@@ -46,11 +46,20 @@ def mock_api_client(monkeypatch):
     Returns:
         Mock APIClient instance with mocked methods
     """
+    # CRITICAL: Mock QMessageBox first to prevent blocking dialogs
+    mock_messagebox_warning = Mock()
+    mock_messagebox_critical = Mock()
+    mock_messagebox_information = Mock()
+
+    monkeypatch.setattr('PyQt6.QtWidgets.QMessageBox.warning', mock_messagebox_warning)
+    monkeypatch.setattr('PyQt6.QtWidgets.QMessageBox.critical', mock_messagebox_critical)
+    monkeypatch.setattr('PyQt6.QtWidgets.QMessageBox.information', mock_messagebox_information)
+
     # Create mock client
     mock_client = Mock(spec=APIClient)
 
-    # Mock connection check
-    mock_client.check_connection.return_value = False  # Return False to avoid showing error dialog
+    # Mock connection check - return True to avoid error dialog path
+    mock_client.check_connection.return_value = True
 
     # Mock get_studies
     mock_client.get_studies.return_value = [
